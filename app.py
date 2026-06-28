@@ -68,10 +68,7 @@ if submitted:
     else:
         with st.spinner("⏳ Generando tu video… esto puede tardar 1-3 minutos"):
             try:
-                client = Client(
-                    "damo-vilab/modelscope-text-to-video-synthesis",
-                    hf_token=hf_token,
-                )
+                client = Client("damo-vilab/modelscope-text-to-video-synthesis")
                 result = client.predict(
                     prompt,
                     num_inference_steps,
