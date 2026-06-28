@@ -3,7 +3,7 @@ import tempfile
 import requests
 import os
 from pathlib import Path
-import replicate
+import fal_client
 
 # ── Configuración de la página ──────────────────────────────────────────────
 st.set_page_config(
@@ -13,35 +13,34 @@ st.set_page_config(
 )
 
 st.title("🎬 Generador de Videos con IA")
-st.caption("Powered by Replicate · Zeroscope v2 XL")
+st.caption("Powered by fal.ai · AnimateDiff Lightning")
 
-# ── Token de Replicate ───────────────────────────────────────────────────────
-replicate_token = st.secrets.get("REPLICATE_API_TOKEN", "") if hasattr(st, "secrets") else ""
+# ── Token de fal.ai ──────────────────────────────────────────────────────────
+fal_token = st.secrets.get("FAL_KEY", "") if hasattr(st, "secrets") else ""
 
-if not replicate_token:
+if not fal_token:
     with st.sidebar:
         st.subheader("🔑 Configuración")
-        replicate_token = st.text_input(
-            "Token de Replicate",
+        fal_token = st.text_input(
+            "API Key de fal.ai",
             type="password",
-            placeholder="r8_xxxxxxxxxxxxxxxxxxxx",
-            help="Obtén tu token gratis en replicate.com → Account → API tokens",
+            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:xxxx",
+            help="Obtén tu key gratis en fal.ai → Dashboard → API Keys",
         )
-        st.markdown("[Crear token gratuito →](https://replicate.com/account/api-tokens)")
+        st.markdown("[Crear cuenta gratuita →](https://fal.ai)")
 else:
     with st.sidebar:
         st.subheader("🔑 Configuración")
-        st.success("Token cargado desde Secrets ✓")
+        st.success("API Key cargada desde Secrets ✓")
 
 # ── Parámetros del modelo ────────────────────────────────────────────────────
 with st.sidebar:
     st.divider()
     st.subheader("⚙️ Parámetros")
     num_frames = st.slider("Número de fotogramas", min_value=8, max_value=24, value=16, step=4)
-    num_inference_steps = st.slider("Pasos de inferencia", min_value=10, max_value=50, value=25, step=5,
-                                     help="Más pasos = más calidad, pero más lento")
-    guidance_scale = st.slider("Escala de guía", min_value=1.0, max_value=15.0, value=7.5, step=0.5,
-                                help="Qué tan fiel es al texto. Valores altos = más literal")
+    num_inference_steps = st.slider("Pasos de inferencia", min_value=4, max_value=8, value=4, step=1,
+                                     help="AnimateDiff Lightning es muy rápido con pocos pasos")
+    guidance_scale = st.slider("Escala de guía", min_value=1.0, max_value=5.0, value=1.0, step=0.5)
 
 # ── Formulario principal ─────────────────────────────────────────────────────
 st.subheader("📝 Describe tu video")
@@ -63,29 +62,26 @@ with st.form("video_form"):
 if submitted:
     if not prompt.strip():
         st.error("Por favor escribe un prompt para generar el video.")
-    elif not replicate_token:
-        st.error("Necesitas ingresar tu token de Replicate en el panel lateral.")
+    elif not fal_token:
+        st.error("Necesitas ingresar tu API Key de fal.ai en el panel lateral.")
     else:
-        with st.spinner("⏳ Generando tu video… esto puede tardar 1-3 minutos"):
+        with st.spinner("⏳ Generando tu video… esto puede tardar 30-60 segundos"):
             try:
-                os.environ["REPLICATE_API_TOKEN"] = replicate_token
+                os.environ["FAL_KEY"] = fal_token
 
-                output = replicate.run(
-                    "anotherjesse/zeroscope-v2-xl:9f747673945c62801b13b84701c783929c0ee784e4748ec062204894dda1a351",
-                    input={
+                result = fal_client.run(
+                    "fal-ai/fast-animatediff/text-to-video",
+                    arguments={
                         "prompt": prompt,
                         "negative_prompt": negative_prompt,
-                        "num_frames": num_frames,
                         "num_inference_steps": num_inference_steps,
                         "guidance_scale": guidance_scale,
-                        "width": 576,
-                        "height": 320,
-                        "fps": 8,
+                        "video_size": "landscape_16_9",
+                        "num_frames": num_frames,
                     }
                 )
 
-                # output es una lista de URLs o un FileOutput
-                video_url = output[0] if isinstance(output, list) else str(output)
+                video_url = result["video"]["url"]
                 video_bytes = requests.get(video_url).content
 
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
@@ -110,10 +106,12 @@ if submitted:
                 import traceback
                 error_msg = str(e)
                 full_trace = traceback.format_exc()
-                if "401" in error_msg or "authorization" in error_msg.lower():
-                    st.error("❌ Token inválido. Verifica tu token de Replicate.")
+                if "401" in error_msg or "unauthorized" in error_msg.lower():
+                    st.error("❌ API Key inválida. Verifica tu key de fal.ai.")
+                elif "402" in error_msg or "credit" in error_msg.lower():
+                    st.error("❌ Sin crédito. Ve a fal.ai/dashboard/billing para recargar.")
                 elif "429" in error_msg:
-                    st.error("❌ Límite de peticiones alcanzado. Espera unos minutos.")
+                    st.error("❌ Límite de peticiones. Espera unos minutos.")
                 else:
                     st.error(f"❌ Error: {error_msg}")
                     st.code(full_trace, language="text")
@@ -132,10 +130,8 @@ with st.expander("💡 Consejos para mejores resultados"):
     - `cinematic`, `4k`, `high quality`, `smooth motion`
     - Iluminación: `golden hour`, `soft light`, `dramatic lighting`
     - Tipo de cámara: `aerial shot`, `close-up`, `wide angle`
-
-    **Prompt negativo útil:** `blurry, low quality, static, no motion, distorted faces`
     """)
 
 st.divider()
-st.caption("Modelo: [Zeroscope v2 XL](https://replicate.com/anotherjesse/zeroscope-v2-xl) · "
+st.caption("Modelo: [AnimateDiff Lightning](https://fal.ai/models/fal-ai/fast-animatediff) · "
            "Hosting gratuito en [Streamlit Community Cloud](https://streamlit.io/cloud)")
