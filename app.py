@@ -1,8 +1,7 @@
 import streamlit as st
 import tempfile
-import requests
-import urllib.request
 from pathlib import Path
+from gradio_client import Client
 
 # ── Configuración de la página ──────────────────────────────────────────────
 st.set_page_config(
@@ -69,31 +68,20 @@ if submitted:
     else:
         with st.spinner("⏳ Generando tu video… esto puede tardar 1-3 minutos"):
             try:
-                API_URL = "https://api-inference.huggingface.co/models/damo-vilab/text-to-video-ms-1.7b"
-                headers = {"Authorization": f"Bearer {hf_token}"}
-                payload = {
-                    "inputs": prompt,
-                    "parameters": {
-                        "negative_prompt": negative_prompt,
-                        "num_frames": num_frames,
-                        "num_inference_steps": num_inference_steps,
-                        "guidance_scale": guidance_scale,
-                    }
-                }
-
-                proxies = urllib.request.getproxies()
-                response = requests.post(API_URL, headers=headers, json=payload, timeout=300, proxies=proxies)
-
-                if response.status_code == 503:
-                    raise Exception("503 loading")
-                elif response.status_code == 401:
-                    raise Exception("401 authorization")
-                elif response.status_code == 429:
-                    raise Exception("429")
-                elif response.status_code != 200:
-                    raise Exception(f"HTTP {response.status_code}: {response.text}")
-
-                video_bytes = response.content
+                client = Client(
+                    "damo-vilab/modelscope-text-to-video-synthesis",
+                    hf_token=hf_token,
+                )
+                result = client.predict(
+                    prompt,
+                    num_inference_steps,
+                    guidance_scale,
+                    api_name="/predict",
+                )
+                # result es la ruta al archivo de video generado
+                video_path = result if isinstance(result, str) else result[0]
+                with open(video_path, "rb") as f:
+                    video_bytes = f.read()
 
                 # Guardar en archivo temporal y mostrar
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
