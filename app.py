@@ -68,14 +68,12 @@ if submitted:
     else:
         with st.spinner("⏳ Generando tu video… esto puede tardar 1-3 minutos"):
             try:
-                client = Client("damo-vilab/modelscope-text-to-video-synthesis")
+                client = Client("ByteDance/AnimateDiff-Lightning")
                 result = client.predict(
                     prompt,
-                    num_inference_steps,
-                    guidance_scale,
-                    api_name="/predict",
+                    negative_prompt,
+                    api_name="/run_inference",
                 )
-                # result es la ruta al archivo de video generado
                 video_path = result if isinstance(result, str) else result[0]
                 with open(video_path, "rb") as f:
                     video_bytes = f.read()
