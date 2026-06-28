@@ -1,9 +1,8 @@
 import streamlit as st
 import tempfile
 import requests
-import os
 from pathlib import Path
-import fal_client
+from huggingface_hub import InferenceClient
 
 # ── Configuración de la página ──────────────────────────────────────────────
 st.set_page_config(
@@ -13,34 +12,32 @@ st.set_page_config(
 )
 
 st.title("🎬 Generador de Videos con IA")
-st.caption("Powered by fal.ai · AnimateDiff Lightning")
+st.caption("Powered by Hugging Face · router.huggingface.co")
 
-# ── Token de fal.ai ──────────────────────────────────────────────────────────
-fal_token = st.secrets.get("FAL_KEY", "") if hasattr(st, "secrets") else ""
+# ── Token de Hugging Face ────────────────────────────────────────────────────
+hf_token = st.secrets.get("HF_TOKEN", "") if hasattr(st, "secrets") else ""
 
-if not fal_token:
+if not hf_token:
     with st.sidebar:
         st.subheader("🔑 Configuración")
-        fal_token = st.text_input(
-            "API Key de fal.ai",
+        hf_token = st.text_input(
+            "Token de Hugging Face",
             type="password",
-            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:xxxx",
-            help="Obtén tu key gratis en fal.ai → Dashboard → API Keys",
+            placeholder="hf_xxxxxxxxxxxxxxxxxxxx",
         )
-        st.markdown("[Crear cuenta gratuita →](https://fal.ai)")
+        st.markdown("[Obtener token gratuito →](https://huggingface.co/settings/tokens)")
 else:
     with st.sidebar:
         st.subheader("🔑 Configuración")
-        st.success("API Key cargada desde Secrets ✓")
+        st.success("Token cargado desde Secrets ✓")
 
 # ── Parámetros del modelo ────────────────────────────────────────────────────
 with st.sidebar:
     st.divider()
     st.subheader("⚙️ Parámetros")
     num_frames = st.slider("Número de fotogramas", min_value=8, max_value=24, value=16, step=4)
-    num_inference_steps = st.slider("Pasos de inferencia", min_value=4, max_value=8, value=4, step=1,
-                                     help="AnimateDiff Lightning es muy rápido con pocos pasos")
-    guidance_scale = st.slider("Escala de guía", min_value=1.0, max_value=5.0, value=1.0, step=0.5)
+    num_inference_steps = st.slider("Pasos de inferencia", min_value=10, max_value=50, value=25, step=5)
+    guidance_scale = st.slider("Escala de guía", min_value=1.0, max_value=15.0, value=7.5, step=0.5)
 
 # ── Formulario principal ─────────────────────────────────────────────────────
 st.subheader("📝 Describe tu video")
@@ -53,7 +50,6 @@ with st.form("video_form"):
     )
     negative_prompt = st.text_input(
         "Prompt negativo (opcional)",
-        placeholder="blurry, low quality, distorted",
         value="blurry, low quality, worst quality, deformed",
     )
     submitted = st.form_submit_button("🎬 Generar Video", use_container_width=True, type="primary")
@@ -62,27 +58,30 @@ with st.form("video_form"):
 if submitted:
     if not prompt.strip():
         st.error("Por favor escribe un prompt para generar el video.")
-    elif not fal_token:
-        st.error("Necesitas ingresar tu API Key de fal.ai en el panel lateral.")
+    elif not hf_token:
+        st.error("Necesitas ingresar tu token de Hugging Face en el panel lateral.")
     else:
-        with st.spinner("⏳ Generando tu video… esto puede tardar 30-60 segundos"):
+        with st.spinner("⏳ Generando tu video… esto puede tardar 1-3 minutos"):
             try:
-                os.environ["FAL_KEY"] = fal_token
-
-                result = fal_client.run(
-                    "fal-ai/fast-animatediff/text-to-video",
-                    arguments={
-                        "prompt": prompt,
-                        "negative_prompt": negative_prompt,
-                        "num_inference_steps": num_inference_steps,
-                        "guidance_scale": guidance_scale,
-                        "video_size": "landscape_16_9",
-                        "num_frames": num_frames,
-                    }
+                client = InferenceClient(
+                    provider="hf-inference",
+                    api_key=hf_token,
                 )
 
-                video_url = result["video"]["url"]
-                video_bytes = requests.get(video_url).content
+                video = client.text_to_video(
+                    prompt,
+                    model="damo-vilab/text-to-video-ms-1.7b",
+                    guidance_scale=guidance_scale,
+                    num_inference_steps=num_inference_steps,
+                )
+
+                # video es un objeto de tipo bytes o similar
+                if hasattr(video, "read"):
+                    video_bytes = video.read()
+                elif isinstance(video, bytes):
+                    video_bytes = video
+                else:
+                    video_bytes = bytes(video)
 
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
                     tmp.write(video_bytes)
@@ -104,12 +103,10 @@ if submitted:
 
             except Exception as e:
                 import traceback
-                error_msg = str(e)
                 full_trace = traceback.format_exc()
-                if "401" in error_msg or "unauthorized" in error_msg.lower():
-                    st.error("❌ API Key inválida. Verifica tu key de fal.ai.")
-                elif "402" in error_msg or "credit" in error_msg.lower():
-                    st.error("❌ Sin crédito. Ve a fal.ai/dashboard/billing para recargar.")
+                error_msg = str(e)
+                if "401" in error_msg or "authorization" in error_msg.lower():
+                    st.error("❌ Token inválido.")
                 elif "429" in error_msg:
                     st.error("❌ Límite de peticiones. Espera unos minutos.")
                 else:
@@ -119,19 +116,14 @@ if submitted:
 # ── Consejos ─────────────────────────────────────────────────────────────────
 with st.expander("💡 Consejos para mejores resultados"):
     st.markdown("""
-    **Escribe prompts en inglés** — el modelo fue entrenado principalmente con texto en inglés.
+    **Escribe prompts en inglés** para mejores resultados.
 
-    **Prompts que funcionan bien:**
+    **Ejemplos:**
     - `A cat playing with a ball of yarn, cozy living room, warm lighting`
-    - `Ocean waves crashing on rocks at sunset, timelapse, cinematic`
+    - `Ocean waves crashing on rocks at sunset, cinematic`
     - `A red sports car driving on a mountain road, aerial view`
-
-    **Incluye detalles de estilo:**
-    - `cinematic`, `4k`, `high quality`, `smooth motion`
-    - Iluminación: `golden hour`, `soft light`, `dramatic lighting`
-    - Tipo de cámara: `aerial shot`, `close-up`, `wide angle`
     """)
 
 st.divider()
-st.caption("Modelo: [AnimateDiff Lightning](https://fal.ai/models/fal-ai/fast-animatediff) · "
+st.caption("Modelo: [damo-vilab/text-to-video-ms-1.7b](https://huggingface.co/damo-vilab/text-to-video-ms-1.7b) · "
            "Hosting gratuito en [Streamlit Community Cloud](https://streamlit.io/cloud)")
